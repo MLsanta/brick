@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>벽돌깨기</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                background-color: #111;
+                color: white;
+                display: grid;
+                place-items: center;
+                width: 100vw;
+                height: 100vh;
+            }
+
+            canvas {
+                background-color: #222;
+                border-radius: 15px;
+            }
+
+            .hint {
+                position: fixed;
+                bottom: 20px;
+                font-size: 20px;
+                color: white;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas width="640" height="420"></canvas>
+        <div class="hint">조작: 방향키 또는 마우스</div>
+        <script>
+            const canvas = document.querySelector("canvas");
+            const ctx = canvas.getContext("2d");
+
+            const w = canvas.width;
+            const h = canvas.height;
+
+            //공
+            let ballX = w / 2;
+            let ballY = h - 60;
+            let ballR = 8;
+            let ballDX = 3;
+            let ballDY = -3;
+
+            //패들
+            let paddleW = 90;
+            let paddleH = 12;
+            let paddleX = (w - paddleW) / 2;
+            let paddleY = h - 30;
+            const paddleDX = 3;
+
+            //벽돌
+            let blockRow = 5;
+            let blockCol = 9;
+            let blockW = 60;
+            let blockH = 18;
+            let blockGap = 8;
+            let offTop = 50;
+            let offLeft = 20;
+
+            //ETC
+            let score = 0;
+            let paused = false;
+            let isLeft = false;
+            let isRight = false;
+
+            //벽돌 생성
+
+            let blocks = [];
+            for (let row = 0; row < blockRow; row++) {
+                blocks[row] = [];
+                for (let col = 0; col < blockCol; col++) {
+                    blocks[row][col] = 1;
+                }
+            }
+            //게임 리셋
+            function reset() {
+                ballX = w / 2;
+                ballY = h - 60;
+
+                ballDX = 3;
+                ballDY = -3;
+
+                paddleX = (w - paddleW) / 2;
+                paddleY = h - 30;
+
+                score = 0;
+
+                for (let row = 0; row < blockRow; row++) {
+                    blocks[row] = [];
+                    for (let col = 0; col < blockCol; col++) {
+                        blocks[row][col] = 1;
+                    }
+                }
+            }
+            //키보드 입력 이벤트
+            document.addEventListener("keydown", (e) => {
+                if (e.code === "ArrowLeft") {
+                    isLeft = true;
+                }
+                if (e.code === "ArrowRight") {
+                    isRight = true;
+                }
+                if (e.code === "Space") {
+                    paused = !paused; // 다시 누를때까지 정지상태를 유지 시키기 위해 토글기능을 씀
+                }
+            });
+
+            document.addEventListener("keyup", (e) => {
+                if (e.code === "ArrowLeft") {
+                    isLeft = false;
+                }
+                if (e.code === "ArrowRight") {
+                    isRight = false;
+                }
+            });
+
+            //마우스 무브 이벤트
+            canvas.addEventListener("mousemove", (e) => {
+                let r = canvas.getBoundingClientRect();
+                let fx = e.clientX - r.left;
+                paddleX = fx - paddleW / 2;
+
+                //왼쪽 벽 처리
+                if (paddleX < 0) {
+                    paddleX = 0;
+                } else if (paddleX + paddleW > w) {
+                    //paddleX > w - paddleW
+                    paddleX = w - paddleW;
+                }
+            });
+
+            //원, 블럭 충돌 함수
+
+            function circleRectHit(cx, cy, cr, rx, ry, rw, rh) {
+                let closestX = Math.max(rx, Math.min(cx, rx + rw));
+                let closestY = Math.max(ry, Math.min(cy, ry + rh));
+
+                let dx = cx - closestX;
+                let dy = cy - closestY;
+
+                return dx * dx + dy * dy <= cr * cr; // 결과가 참이면 충돌
+            }
+
+            //공그리기
+
+            function drawBall() {
+                ctx.beginPath();
+                ctx.arc(ballX, ballY, ballR, 0, Math.PI * 2);
+                ctx.fillStyle = "gold";
+                ctx.fill();
+            }
+            //패들 그리기
+
+            function drawPaddle() {
+                ctx.fillStyle = "darkblue";
+                ctx.fillRect(paddleX, paddleY, paddleW, paddleH);
+            }
+
+            function drawBlock() {
+                for (let row = 0; row < blockRow; row++) {
+                    for (let col = 0; col < blockCol; col++) {
+                        if (!blocks[row][col]) continue; //만약 이 값이 참이면 밑의 명령을 건너뛰어라(실행 X)
+                        let x = offLeft + col * (blockW + blockGap);
+                        let y = offTop + row * (blockH + blockGap);
+
+                        ctx.fillStyle = `hsl(${
+                            (row * 60 + col * 8) % 360
+                        } 80% 55%)`;
+                        ctx.fillRect(x, y, blockW, blockH);
+                    }
+                }
+            }
+
+            function drawHUD() {
+                ctx.font = "16px sans-serif";
+                ctx.fillStyle = "white";
+                ctx.fillText(`SCORE : ${score}`, 15, 25);
+                if (paused === true) {
+                    ctx.font = "30px sans-serif";
+                    ctx.fillText(`PAUSE(press space)`, w / 2, h / 2);
+                }
+            }
+
+            //벽과 충돌
+
+            //양쪽 벽 충돌
+            function wallHit() {
+                if (ballX - ballR < 0 || ballX + ballR > w) {
+                    ballDX *= -1;
+                }
+
+                //위쪽 벽 충돌
+
+                if (ballY - ballR < 0) {
+                    ballDY *= -1;
+                }
+
+                //바닥 충돌
+
+                if (ballY - ballR > h) {
+                    alert(`게임 오버! 총 스코어 : ${score}점!`);
+                    reset();
+                }
+            }
+
+            //공과 패들 충돌
+            function paddleHit() {
+                if (
+                    circleRectHit(
+                        ballX,
+                        ballY,
+                        ballR,
+                        paddleX,
+                        paddleY,
+                        paddleW,
+                        paddleH
+                    ) &&
+                    ballDY > 0
+                ) {
+                    ballDY *= -1;
+
+                    if (ballX < paddleX + paddleW / 3) {
+                        //패들의 왼쪽 1/3에 맞음 ==> 왼쪽 대각선으로
+                        ballDX = -4;
+                    } else if (ballX < paddleX + paddleW * (2 / 3)) {
+                        //패들의 오른쪽 1/3에 맞음 ==> 오른쪽 대각선으로
+                        ballDX = 4;
+                    } else {
+                        ballDX = 0;
+                    }
+                }
+            }
+
+            //공, 벽돌 충돌
+
+            function blockHit() {
+                for (let row = 0; row < blockRow; row++) {
+                    for (let col = 0; col < blockCol; col++) {
+                        if (!blocks[row][col]) continue; //만약 이 값이 참이면 밑의 명령을 건너뛰어라(실행 X)
+                        let x = offLeft + col * (blockW + blockGap);
+                        let y = offTop + row * (blockH + blockGap);
+
+                        if (
+                            circleRectHit(
+                                ballX,
+                                ballY,
+                                ballR,
+                                x,
+                                y,
+                                blockW,
+                                blockH
+                            )
+                        ) {
+                            blocks[row][col] = 0;
+                            score += 10;
+                            ballDY *= -1;
+                            if (isclear()) {
+                                alert(
+                                    `CLEAR!!! 축하합니다! 최종 스코어:${score}`
+                                );
+                                reset();
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+
+            //클리어 판정 함수
+
+            function isclear() {
+                for (let row = 0; row < blockRow; row++) {
+                    for (let col = 0; col < blockCol; col++) {
+                        if (blocks[row][col]) {
+                            return false;
+                            canvas_벽돌깨기.html;
+                        }
+                    }
+                }
+                return true;
+            }
+
+            function gameA() {
+                if (!paused) {
+                    if (isLeft) {
+                        paddleX -= paddleDX;
+                    } else if (isRight) {
+                        paddleX += paddleDX;
+                    } else if (paddleX < 0) {
+                        paddleX = 0;
+                    } else if (paddleX > w - paddleW) {
+                        paddleX = w - paddleW;
+                    }
+
+                    ballX += ballDX;
+                    ballY += ballDY;
+
+                    wallHit();
+                    paddleHit();
+                    blockHit();
+                }
+
+                ctx.clearRect(0, 0, w, h);
+                drawBlock();
+                drawPaddle();
+                drawBall();
+                drawHUD();
+
+                requestAnimationFrame(gameA);
+            }
+
+            gameA();
+        </script>
+    </body>
+</html>
